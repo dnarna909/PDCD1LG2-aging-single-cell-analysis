@@ -20,3 +20,48 @@ The main analysis script is located at:
 
 ```text
 scripts/PDCD1LG2_age_analysis.R
+
+
+## How to use this repository
+
+1. Clone or download this repository:
+
+```bash
+git clone https://github.com/dnarna909/PDCD1LG2-aging-single-cell-analysis.git
+cd PDCD1LG2-aging-single-cell-analysis
+
+2. Download the required .h5ad file from CELLxGENE.
+
+3. Place the .h5ad file in the data/ folder:
+data/Healthy pediatric and adult human liver tissue.h5ad
+
+4. Install the required R packages:
+install.packages(c(
+  "Seurat",
+  "SeuratDisk",
+  "dplyr",
+  "ggplot2",
+  "stringr",
+  "fs",
+  "tidyr",
+  "broom",
+  "scales",
+  "ggpubr",
+  "remotes",
+  "BiocManager"
+))
+
+remotes::install_github("mojaveazure/seurat-disk")
+BiocManager::install(c("rhdf5", "anndataR"))
+
+5. Run the analysis:
+source("scripts/PDCD1LG2_age_analysis.R")
+
+Or from Terminal:
+
+Rscript scripts/PDCD1LG2_age_analysis.R
+
+6. Output files will be saved in the results/ folder.
+
+One small correction: you wrote **H5D**, but for this script the expected file type is **`.h5ad`**.
+::contentReference[oaicite:1]{index=1}
