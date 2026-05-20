@@ -54,3 +54,6 @@ Statistical analysis and visualization
 All analyses were performed in R using the Seurat, anndataR, dplyr, tidyr, stringr, broom, ggplot2, ggpubr, scales, and fs packages. Linear regression was used to assess associations between age and gene expression metrics. Wilcoxon rank-sum tests were used for donor-level comparisons between target gene-positive and target gene-negative groups. Multiple testing correction was performed using the Benjamini-Hochberg method. Adjusted P values less than 0.05 were considered statistically significant.
 Figures were generated using ggplot2 with publication-oriented formatting. Outputs included regression plots, donor-level boxplots, cell type-specific plots, and CSV summary tables containing model statistics and comparison results.
 
+
+Data and code availability
+The R scripts used in this study are publicly available at GitHub: https://github.com/dnarna909/PDCD1LG2-aging-single-cell-analysis. The main analysis script is located at scripts/PDCD1LG2_age_analysis.R. Public .h5ad datasets were obtained from CELLxGENE and are not redistributed in the GitHub repository because of file size considerations.
