@@ -21,31 +21,33 @@ The main analysis script is located at:
 
 ```text
 scripts/PDCD1LG2_age_analysis.R
-```markdown
+```
 
 ## How to use this repository
 1. Clone or download this repository
+```bash
 git clone https://github.com/dnarna909/PDCD1LG2-aging-single-cell-analysis.git
 cd PDCD1LG2-aging-single-cell-analysis
-
+```
 Alternatively, download the repository as a ZIP file from GitHub.
 
-2. Download the required .h5ad file
+2. Download the required '.h5ad' file
 
-Download the required .h5ad file from CELLxGENE.
+Download the required `.h5ad` file from CELLxGENE.
 
 3. Place the .h5ad file in the data/ folder
 
 The expected file path is:
-
+```text
 data/Healthy pediatric and adult human liver tissue.h5ad
+```
 
 If your downloaded file has a different name, either rename the file or update the file_list section in the R script.
 
 4. Install the required R packages
 
 Run the following commands in R or RStudio:
-
+```R
 install.packages(c(
   "Seurat",
   "dplyr",
@@ -66,15 +68,17 @@ BiocManager::install(c(
   "rhdf5",
   "anndataR"
 ))
+```
 5. Run the analysis
 
 From R or RStudio:
-
+```R
 source("scripts/PDCD1LG2_age_analysis.R")
-
+```
 Or from Terminal:
-
+```Bash
 Rscript scripts/PDCD1LG2_age_analysis.R
+```
 6. View output files
 
 Output files will be saved in the results/ folder.
@@ -89,7 +93,7 @@ A sessionInfo.txt file for reproducibility
 Output structure
 
 Example output structure:
-
+```text
 results/
 └── Healthy pediatric and adult human liver tissue/
     ├── PDCD1LG2/
@@ -99,7 +103,8 @@ results/
     ├── CDKN2A/
     ├── IFNG/
     └── TNF/
-Notes
+```
+## Notes
 
 The .h5ad data files are intentionally excluded from this repository because they are large. Users should download the data directly from CELLxGENE and place the file in the data/ folder before running the analysis.
 
