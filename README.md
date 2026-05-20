@@ -13,7 +13,7 @@ This repository contains R scripts used to analyze age-associated expression of 
 
 The analysis uses `.h5ad` files downloaded from public CELLxGENE datasets. 
 
-Dataset collection: [Healthy pediatric and adult human liver tissue - CELLxGENE] (https://cellxgene.cziscience.com/collections/ff69f0ee-fef6-4895-9f48-6c64a68c8289?explainNewTabFat)
+Dataset collection: [Healthy pediatric and adult human liver tissue - CELLxGENE] (https://cellxgene.cziscience.com/collections/ff69f0ee-fef6-4895-9f48-6c64a68c8289?explainNewTab)
 
 Large data files are not included in this repository. Please download the datasets separately and place them in a local data directory.
 
