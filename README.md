@@ -5,9 +5,8 @@ This repository contains R scripts used to analyze age-associated expression of 
 
 ## Project goals
 
-1. Evaluate whether PDCD1LG2 expression changes with age across all cells.
-2. Evaluate whether PDCD1LG2 expression changes with age within individual cell types.
-3. Compare expression of selected genes, including MMP2, MMP9, CDKN1A, CDKN2A, IFNG, and TNF, between PDCD1LG2-positive and PDCD1LG2-negative cells.
+1. Evaluate whether PDCD1LG2, MMP2, MMP9, CDKN1A, CDKN2A, IFNG, and TNF expression changes with age across all cells.  
+2. Evaluate whether PDCD1LG2, MMP2, MMP9, CDKN1A, CDKN2A, IFNG, and TNF expression changes with age within individual cell types.
 
 ## Input data
 
@@ -66,7 +65,8 @@ install.packages(c(
   "scales",
   "ggpubr",
   "remotes",
-  "BiocManager"
+  "BiocManager",
+  "openxlsx"
 ))
 
 remotes::install_github("mojaveazure/seurat-disk")
@@ -103,7 +103,6 @@ The script generates:
 
 Donor-level age association plots
 Cell type-specific age association plots
-Target gene-positive versus target gene-negative comparison plots
 CSV files containing statistical summaries
 A `sessionInfo.txt` file for reproducibility
 Output structure
