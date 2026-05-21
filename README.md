@@ -82,6 +82,10 @@ BiocManager::install(c(
 From R or RStudio:
 
 ```r
+Sys.setenv(
+  DATA_DIR = "/path/to/your/data/",
+  RESULTS_DIR = "/path/to/your/results"
+)
 source("scripts/PDCD1LG2_age_analysis.R")
 ```
 
