@@ -5,9 +5,8 @@
 # ============================================================
 #
 # Goals:
-#   1. Test whether target gene expression changes with age across all cells.
-#   2. Test whether target gene expression changes with age within cell types.
-#   3. Compare selected genes between target gene-positive and target gene-negative cells.
+#  1. Evaluate whether PDCD1LG2, MMP2, MMP9, CDKN1A, CDKN2A, IFNG, and TNF expression changes with age across all cells.
+#  2. Evaluate whether PDCD1LG2, MMP2, MMP9, CDKN1A, CDKN2A, IFNG, and TNF expression changes with age within individual cell types.
 #
 # GitHub-ready notes:
 #   - Do not hard-code local computer paths.
@@ -18,7 +17,7 @@
 #   Rscript scripts/PDCD1LG2_age_analysis_github_ready.R
 #
 # Optional environment variables:
-#   DATA_DIR=/path/to/h5ad/files RESULTS_DIR=/path/to/results Rscript scripts/PDCD1LG2_age_analysis_github_ready.R
+#   DATA_DIR=/path/to/h5ad/files RESULTS_DIR=/path/to/results Rscript scripts/PDCD1LG2_age_analysis.R
 # ============================================================
 
 
