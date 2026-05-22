@@ -502,8 +502,9 @@ for (ff in seq_along(file_list)) {
         .groups = "drop"
       )
 
-    covars <- c("sex", "tissue")
-
+    # covars <- c("sex", "tissue")
+    covars <- c("sex")
+    
     valid_covars <- covars[
       vapply(covars, function(x) {
         x %in% colnames(donor_expr) &&
