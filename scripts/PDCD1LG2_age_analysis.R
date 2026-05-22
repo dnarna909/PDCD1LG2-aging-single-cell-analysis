@@ -36,7 +36,8 @@ required_packages <- c(
   "tidyr",
   "broom",
   "scales",
-  "ggpubr"
+  "ggpubr",
+  "openxlsx"
 )
 
 missing_packages <- required_packages[
@@ -62,6 +63,7 @@ suppressPackageStartupMessages({
   library(broom)
   library(scales)
   library(ggpubr)
+  library(openxlsx)
 })
 
 
@@ -77,7 +79,6 @@ suppressPackageStartupMessages({
 # You can override these with environment variables:
 #   DATA_DIR=/path/to/data
 #   RESULTS_DIR=/path/to/results
-
 data_dir <- Sys.getenv("DATA_DIR", unset = "data")
 results_dir <- Sys.getenv("RESULTS_DIR", unset = "results")
 
@@ -224,22 +225,20 @@ get_expression_matrix <- function(seurat_obj) {
   LayerData(seurat_obj, assay = assay_name, layer = layer_use)
 }
 
-get_model_label <- function(model) {
+get_model_label <- function(model, p_adj) {
   model_summary <- summary(model)
 
   r2 <- model_summary$r.squared
-
-  age_p <- broom::tidy(model) %>%
-    dplyr::filter(term == "age") %>%
-    dplyr::pull(p.value)
-
-  if (length(age_p) == 0) {
-    age_p <- NA_real_
-  }
-
+  
+  p_label <- ifelse(
+    p_adj < 0.001,
+    "adj. P < 0.001",
+    paste0("adj. P = ", signif(p_adj, 3))
+  )
+  
   paste0(
-    "R\u00b2 = ", round(r2, 3),
-    "\n", format_p(age_p, prefix = "P")
+    "R² = ", round(r2, 3),
+    "\n", p_label
   )
 }
 
@@ -376,11 +375,19 @@ for (ff in seq_along(file_list)) {
     save_plot_pdf_png(
       plot = p_umap,
       filename_base = file.path(dataset_out_dir, "celltype_umap_overview"),
-      width = 7,
+      width = 12,
       height = 6
     )
   }
 
+  # save patient info
+  library(openxlsx)
+  write.xlsx(list(subjects = table(seurat_obj$development_stage, seurat_obj$donor_id),
+       cell_type = table(seurat_obj$cell_type, seurat_obj$donor_id) ), 
+       file = file.path(dataset_out_dir, paste0("celltype_summary_results.xlsx")),
+       overwrite = TRUE
+  )
+  
   expr_mat <- get_expression_matrix(seurat_obj)
   feature_names <- rownames(expr_mat)
   gene_id_type <- detect_gene_id_type(feature_names)
@@ -417,6 +424,7 @@ for (ff in seq_along(file_list)) {
     age_col <- "development_stage"
   }
 
+  all_gene_celltype_stats <- list()
   for (target_gene_symbol in analysis_gene_symbols) {
 
     message("---------------------------------------------------")
@@ -521,9 +529,20 @@ for (ff in seq_along(file_list)) {
 
     model_all_mean <- lm(formula_mean, data = donor_expr)
     model_all_pct <- lm(formula_pct, data = donor_expr)
+    
+    age_p_all <- c(
+      mean_expression = broom::tidy(model_all_mean) %>%
+        filter(term == "age") %>%
+        pull(p.value),
+      percent_positive = broom::tidy(model_all_pct) %>%
+        filter(term == "age") %>%
+        pull(p.value)
+    )
+    
+    age_p_adj_all <- p.adjust(age_p_all, method = "BH")
 
-    label_mean <- get_model_label(model_all_mean)
-    label_pct <- get_model_label(model_all_pct)
+    label_mean <- get_model_label(model_all_mean, age_p_adj_all["mean_expression"])
+    label_pct <- get_model_label(model_all_pct, age_p_adj_all["percent_positive"])
 
     p_all_mean <- ggplot(donor_expr, aes(x = age, y = mean_target_gene)) +
       geom_point(aes(size = n_cells), alpha = 0.75, color = "black") +
@@ -602,13 +621,20 @@ for (ff in seq_along(file_list)) {
     fs::dir_create(mean_plot_dir)
     fs::dir_create(pct_plot_dir)
 
-    get_lm_label <- function(data, y_var) {
+    get_lm_label <- function(data, y_var, p_adj) {
       model <- lm(as.formula(paste0(y_var, " ~ age")), data = data)
-      get_model_label(model)
+      model_summary <- summary(model)
+      
+      r2 <- model_summary$r.squared
+      
+      paste0(
+        "R\u00b2 = ", round(r2, 3),
+        "\n", format_p(p_adj, prefix = "adj. P")
+      )
     }
 
-    make_celltype_plot <- function(data, y_var, y_label, title_text, line_color, fill_color) {
-      label_text <- get_lm_label(data, y_var)
+    make_celltype_plot <- function(data, y_var, y_label, title_text, line_color, fill_color, p_adj) {
+      label_text <- get_lm_label(data, y_var, p_adj)
 
       ggplot(data, aes(x = age, y = .data[[y_var]])) +
         geom_point(aes(size = n_cells), alpha = 0.75, color = "black") +
@@ -661,12 +687,26 @@ for (ff in seq_along(file_list)) {
       ) %>%
       arrange(p_adj_mean)
 
+    # Save cell type statistics for all-gene heatmaps.
+    all_gene_celltype_stats[[target_gene_symbol]] <- celltype_stats %>%
+      mutate(target_gene_symbol = target_gene_symbol)
+    
     write.csv(
       celltype_stats,
       file.path(gene_out_dir, paste0(target_gene_symbol, "_age_correlation_by_celltype.csv")),
       row.names = FALSE
     )
 
+    write.csv(
+      celltype_expr,
+      file.path(gene_out_dir, paste0(target_gene_symbol, "_donor_level_expression_by_celltype.csv")),
+      row.names = FALSE
+    )
+    
+    # ------------------------------------------------------------
+    # Plot: age association by cell type
+    # ------------------------------------------------------------
+    
     celltypes_to_plot <- celltype_stats %>%
       filter(n_donors >= min_donors_per_celltype) %>%
       pull(cell_type)
@@ -676,6 +716,9 @@ for (ff in seq_along(file_list)) {
         filter(cell_type == ct)
 
       ct_safe <- safe_filename(ct)
+      
+      ct_stats <- celltype_stats %>%
+        filter(cell_type == ct)
 
       p_mean <- make_celltype_plot(
         data = plot_data,
@@ -683,7 +726,8 @@ for (ff in seq_along(file_list)) {
         y_label = paste0("Mean ", target_gene_symbol, " expression per donor"),
         title_text = paste0(target_gene_symbol, " mean expression vs age\n", ct),
         line_color = "#2C7BB6",
-        fill_color = "#ABD9E9"
+        fill_color = "#ABD9E9",
+        p_adj = ct_stats$p_adj_mean[1]
       )
 
       p_pct <- make_celltype_plot(
@@ -692,7 +736,8 @@ for (ff in seq_along(file_list)) {
         y_label = paste0("% ", target_gene_symbol, "+ cells per donor"),
         title_text = paste0(target_gene_symbol, "-positive cell percentage vs age\n", ct),
         line_color = "#D7191C",
-        fill_color = "#FDAE61"
+        fill_color = "#FDAE61",
+        p_adj = ct_stats$p_adj_pct[1]
       )
 
       save_plot_pdf_png(
@@ -710,440 +755,214 @@ for (ff in seq_along(file_list)) {
       )
     }
 
-    # ============================================================
-    # Goal 3: Positive-vs-negative comparison
-    # ============================================================
-
-    genes_for_positive_analysis <- other_genes_found[other_genes_found %in% colnames(df)]
-
-    if (length(genes_for_positive_analysis) == 0) {
-      warning("Skipping positive-vs-negative analysis for ", target_gene_symbol, ".")
-      next
-    }
-
-    gene_label_map <- setNames(
-      other_gene_symbols[match(other_genes_found, other_genes)],
-      other_genes_found
-    )
-
-    positive_label <- paste0(target_gene_symbol, "+")
-    negative_label <- paste0(target_gene_symbol, "-")
-
-    df_pos <- df %>%
-      mutate(
-        target_gene_status = ifelse(
-          .data[["target_gene"]] > 0,
-          positive_label,
-          negative_label
-        ),
-        target_gene_status = factor(
-          target_gene_status,
-          levels = c(negative_label, positive_label)
-        )
-      )
-
-    positive_plot_dir <- file.path(gene_out_dir, paste0(target_gene_symbol, "_positive_vs_negative_plots"))
-    fs::dir_create(positive_plot_dir)
-
-    plot_df <- df_pos %>%
-      dplyr::select(
-        cell_barcode,
-        donor_id,
-        age,
-        cell_type,
-        target_gene_status,
-        all_of(genes_for_positive_analysis)
-      ) %>%
-      pivot_longer(
-        cols = all_of(genes_for_positive_analysis),
-        names_to = "gene",
-        values_to = "expression"
-      ) %>%
-      mutate(gene_symbol = gene_label_map[gene])
-
-    p_pos_box <- ggplot(
-      plot_df,
-      aes(x = target_gene_status, y = expression, fill = target_gene_status)
-    ) +
-      geom_boxplot(width = 0.6, outlier.size = 0.15, linewidth = 0.5) +
-      facet_wrap(~ gene_symbol, scales = "free_y") +
-      scale_fill_manual(
-        values = setNames(
-          c("grey80", "#D7191C"),
-          c(negative_label, positive_label)
-        )
-      ) +
-      labs(
-        title = paste0("Selected gene expression in ", target_gene_symbol, "+ vs ", target_gene_symbol, "- cells"),
-        subtitle = "Cell-level visualization only",
-        x = "",
-        y = "Expression"
-      ) +
-      theme_pub() +
-      theme(
-        legend.position = "none",
-        axis.text.x = element_text(angle = 30, hjust = 1)
-      )
-
-    save_plot_pdf_png(
-      p_pos_box,
-      file.path(positive_plot_dir, paste0(target_gene_symbol, "_positive_vs_negative_other_genes_cell_level_boxplot")),
-      width = 10,
-      height = 6
-    )
-
-    # Donor-level positive-vs-negative test.
-    donor_pos_expr <- df_pos %>%
-      group_by(donor_id, age, sex, tissue, target_gene_status) %>%
-      summarise(
-        across(
-          all_of(genes_for_positive_analysis),
-          ~ mean(.x, na.rm = TRUE),
-          .names = "mean_{.col}"
-        ),
-        n_cells = n(),
-        .groups = "drop"
-      ) %>%
-      filter(n_cells >= min_cells_positive_negative_all)
-
-    donor_pos_long <- donor_pos_expr %>%
-      pivot_longer(
-        cols = starts_with("mean_"),
-        names_to = "gene",
-        values_to = "mean_expression"
-      ) %>%
-      mutate(
-        gene = str_remove(gene, "^mean_"),
-        gene_symbol = gene_label_map[gene],
-        target_gene_status = factor(
-          target_gene_status,
-          levels = c(negative_label, positive_label)
-        )
-      )
-
-    positive_stats <- donor_pos_long %>%
-      group_by(gene, gene_symbol) %>%
-      summarise(
-        n_negative = sum(target_gene_status == negative_label),
-        n_positive = sum(target_gene_status == positive_label),
-
-        mean_positive = mean(
-          mean_expression[target_gene_status == positive_label],
-          na.rm = TRUE
-        ),
-        mean_negative = mean(
-          mean_expression[target_gene_status == negative_label],
-          na.rm = TRUE
-        ),
-
-        median_positive = median(
-          mean_expression[target_gene_status == positive_label],
-          na.rm = TRUE
-        ),
-        median_negative = median(
-          mean_expression[target_gene_status == negative_label],
-          na.rm = TRUE
-        ),
-
-        log2FC_positive_vs_negative = log2((mean_positive + 0.01) / (mean_negative + 0.01)),
-
-        p_value = if (
-          n_distinct(target_gene_status) == 2 &&
-            n_positive >= 2 &&
-            n_negative >= 2
-        ) {
-          wilcox.test(mean_expression ~ target_gene_status)$p.value
-        } else {
-          NA_real_
-        },
-
-        .groups = "drop"
-      ) %>%
-      mutate(
-        p_adj = p.adjust(p_value, method = "BH"),
-        p_label = format_p(p_adj, prefix = "adj. P"),
-        direction = case_when(
-          p_adj < 0.05 & log2FC_positive_vs_negative > 0 ~ paste0("Higher in ", target_gene_symbol, "+ cells"),
-          p_adj < 0.05 & log2FC_positive_vs_negative < 0 ~ paste0("Lower in ", target_gene_symbol, "+ cells"),
-          TRUE ~ "No significant difference"
-        )
-      ) %>%
-      arrange(p_adj)
-
-    write.csv(
-      positive_stats,
-      file.path(gene_out_dir, paste0(target_gene_symbol, "_positive_population_other_genes_stats.csv")),
-      row.names = FALSE
-    )
-
-    label_df <- donor_pos_long %>%
-      group_by(gene, gene_symbol) %>%
-      summarise(
-        y_max = max(mean_expression, na.rm = TRUE),
-        y_min = min(mean_expression, na.rm = TRUE),
-        .groups = "drop"
-      ) %>%
-      mutate(
-        y_range = ifelse(y_max - y_min == 0, y_max, y_max - y_min),
-        y_range = ifelse(y_range == 0, 0.1, y_range),
-        y.position = y_max + 0.02 * y_range,
-        y.expand = y_max + 0.08 * y_range
-      ) %>%
-      left_join(
-        positive_stats %>% dplyr::select(gene, p_label),
-        by = "gene"
-      ) %>%
-      mutate(
-        group1 = negative_label,
-        group2 = positive_label
-      )
-
-    p_pos_donor <- ggplot(
-      donor_pos_long,
-      aes(x = target_gene_status, y = mean_expression, fill = target_gene_status)
-    ) +
-      geom_blank(
-        data = label_df,
-        aes(x = group1, y = y.expand),
-        inherit.aes = FALSE
-      ) +
-      geom_boxplot(width = 0.55, outlier.shape = NA, linewidth = 0.6, alpha = 0.85) +
-      geom_jitter(aes(size = n_cells), width = 0.12, alpha = 0.7, color = "black") +
-      ggpubr::stat_pvalue_manual(
-        label_df,
-        label = "p_label",
-        y.position = "y.position",
-        tip.length = 0.01,
-        size = 3.5,
-        fontface = "bold",
-        bracket.size = 0.4
-      ) +
-      facet_wrap(~ gene_symbol, scales = "free_y") +
-      scale_fill_manual(
-        values = setNames(
-          c("grey80", "#D7191C"),
-          c(negative_label, positive_label)
-        )
-      ) +
-      scale_size_continuous(name = "Cells per donor", range = c(1.8, 4.8)) +
-      coord_cartesian(clip = "off") +
-      labs(
-        title = paste0("Donor-level mean expression in ", target_gene_symbol, "+ vs ", target_gene_symbol, "- cells"),
-        subtitle = "Each point represents one donor-level mean; P values are BH-adjusted Wilcoxon tests",
-        x = "",
-        y = "Mean expression per donor"
-      ) +
-      theme_pub() +
-      theme(
-        legend.position = "right",
-        axis.text.x = element_text(angle = 30, hjust = 1),
-        plot.margin = margin(16, 24, 16, 24),
-        panel.spacing = unit(1.2, "lines")
-      )
-
-    save_plot_pdf_png(
-      p_pos_donor,
-      file.path(positive_plot_dir, paste0(target_gene_symbol, "_positive_vs_negative_other_genes_donor_level")),
-      width = 10.5,
-      height = 7
-    )
-
-    # ============================================================
-    # Goal 3b: Positive-vs-negative comparison by cell type
-    # ============================================================
-
-    celltype_pos_plot_dir <- file.path(
-      gene_out_dir,
-      paste0(target_gene_symbol, "_positive_vs_negative_by_celltype_plots")
-    )
-
-    fs::dir_create(celltype_pos_plot_dir)
-
-    celltype_pos_long <- df_pos %>%
-      group_by(donor_id, age, sex, tissue, cell_type, target_gene_status) %>%
-      summarise(
-        across(
-          all_of(genes_for_positive_analysis),
-          ~ mean(.x, na.rm = TRUE),
-          .names = "mean_{.col}"
-        ),
-        n_cells = n(),
-        .groups = "drop"
-      ) %>%
-      filter(n_cells >= min_cells_positive_negative_celltype) %>%
-      pivot_longer(
-        cols = starts_with("mean_"),
-        names_to = "gene",
-        values_to = "mean_expression"
-      ) %>%
-      mutate(
-        gene = str_remove(gene, "^mean_"),
-        gene_symbol = gene_label_map[gene],
-        target_gene_status = factor(
-          target_gene_status,
-          levels = c(negative_label, positive_label)
-        )
-      )
-
-    celltype_positive_stats <- celltype_pos_long %>%
-      group_by(cell_type, gene, gene_symbol) %>%
-      filter(
-        n_distinct(target_gene_status) == 2,
-        n_distinct(donor_id) >= min_donors_per_celltype
-      ) %>%
-      summarise(
-        n_donors = n_distinct(donor_id),
-        n_negative = sum(target_gene_status == negative_label),
-        n_positive = sum(target_gene_status == positive_label),
-
-        mean_positive = mean(
-          mean_expression[target_gene_status == positive_label],
-          na.rm = TRUE
-        ),
-        mean_negative = mean(
-          mean_expression[target_gene_status == negative_label],
-          na.rm = TRUE
-        ),
-
-        median_positive = median(
-          mean_expression[target_gene_status == positive_label],
-          na.rm = TRUE
-        ),
-        median_negative = median(
-          mean_expression[target_gene_status == negative_label],
-          na.rm = TRUE
-        ),
-
-        log2FC_positive_vs_negative = log2(
-          (mean_positive + 0.01) / (mean_negative + 0.01)
-        ),
-
-        p_value = if (n_positive >= 2 && n_negative >= 2) {
-          wilcox.test(mean_expression ~ target_gene_status)$p.value
-        } else {
-          NA_real_
-        },
-
-        .groups = "drop"
-      ) %>%
-      group_by(cell_type) %>%
-      mutate(
-        p_adj = p.adjust(p_value, method = "BH"),
-        p_label = format_p(p_adj, prefix = "adj. P"),
-        direction = case_when(
-          p_adj < 0.05 & log2FC_positive_vs_negative > 0 ~ paste0("Higher in ", target_gene_symbol, "+ cells"),
-          p_adj < 0.05 & log2FC_positive_vs_negative < 0 ~ paste0("Lower in ", target_gene_symbol, "+ cells"),
-          TRUE ~ "No significant difference"
-        )
-      ) %>%
-      ungroup() %>%
-      arrange(cell_type, p_adj)
-
-    write.csv(
-      celltype_positive_stats,
-      file.path(gene_out_dir, paste0(target_gene_symbol, "_positive_population_other_genes_by_celltype.csv")),
-      row.names = FALSE
-    )
-
-    celltypes_to_plot <- celltype_positive_stats %>%
-      distinct(cell_type) %>%
-      pull(cell_type)
-
-    for (ct in celltypes_to_plot) {
-      plot_data <- celltype_pos_long %>%
-        filter(cell_type == ct) %>%
-        semi_join(
-          celltype_positive_stats %>% filter(cell_type == ct),
-          by = c("cell_type", "gene", "gene_symbol")
-        )
-
-      stat_data <- celltype_positive_stats %>%
-        filter(cell_type == ct)
-
-      if (nrow(plot_data) == 0 || nrow(stat_data) == 0) {
-        next
-      }
-
-      label_df <- plot_data %>%
-        group_by(gene, gene_symbol) %>%
-        summarise(
-          y_max = max(mean_expression, na.rm = TRUE),
-          y_min = min(mean_expression, na.rm = TRUE),
-          .groups = "drop"
-        ) %>%
-        mutate(
-          y_range = ifelse(y_max - y_min == 0, y_max, y_max - y_min),
-          y_range = ifelse(y_range == 0, 0.1, y_range),
-          y.position = y_max + 0.04 * y_range,
-          y.expand = y_max + 0.12 * y_range
-        ) %>%
-        left_join(
-          stat_data %>% dplyr::select(gene, p_label),
-          by = "gene"
-        ) %>%
-        mutate(
-          group1 = negative_label,
-          group2 = positive_label
-        )
-
-      p_ct <- ggplot(
-        plot_data,
-        aes(x = target_gene_status, y = mean_expression, fill = target_gene_status)
-      ) +
-        geom_blank(
-          data = label_df,
-          aes(x = group1, y = y.expand),
-          inherit.aes = FALSE
-        ) +
-        geom_boxplot(width = 0.55, outlier.shape = NA, linewidth = 0.6, alpha = 0.85) +
-        geom_jitter(aes(size = n_cells), width = 0.12, alpha = 0.7, color = "black") +
-        ggpubr::stat_pvalue_manual(
-          label_df,
-          label = "p_label",
-          y.position = "y.position",
-          tip.length = 0.01,
-          size = 3.4,
-          fontface = "bold",
-          bracket.size = 0.4
-        ) +
-        facet_wrap(~ gene_symbol, scales = "free_y", ncol = 3) +
-        scale_fill_manual(
-          values = setNames(
-            c("grey80", "#D7191C"),
-            c(negative_label, positive_label)
-          )
-        ) +
-        scale_size_continuous(name = "Cells per donor", range = c(1.8, 4.8)) +
-        coord_cartesian(clip = "off") +
-        labs(
-          title = paste0(target_gene_symbol, "+ vs ", target_gene_symbol, "- cells in ", ct),
-          subtitle = "Each point represents one donor-level mean; P values are BH-adjusted Wilcoxon tests",
-          x = "",
-          y = "Mean expression per donor",
-          fill = "Cell status"
-        ) +
-        theme_pub() +
-        theme(
-          legend.position = "right",
-          axis.text.x = element_text(angle = 30, hjust = 1)
-        )
-
-      ct_safe <- safe_filename(ct)
-
-      save_plot_pdf_png(
-        p_ct,
-        file.path(
-          celltype_pos_plot_dir,
-          paste0(target_gene_symbol, "_positive_vs_negative_other_genes_", ct_safe)
-        ),
-        width = 10.5,
-        height = 6.8
-      )
-    }
-
-    gc()
   }
 
+  # ============================================================
+  # All-gene cell type heatmaps
+  # Rows = cell types
+  # Columns = target genes
+  # ============================================================
+  
+  if (length(all_gene_celltype_stats) > 0) {
+    
+    all_celltype_stats_df <- dplyr::bind_rows(all_gene_celltype_stats)
+    
+    shared_celltype_order <- all_celltype_stats_df %>%
+      filter(target_gene_symbol == "PDCD1LG2") %>%
+      arrange(beta_age_mean) %>%
+      pull(cell_type)
+    # If some cell types are missing from PDCD1LG2 but present for other genes, add them at the end.
+    shared_celltype_order <- c(
+      shared_celltype_order,
+      setdiff(unique(all_celltype_stats_df$cell_type), shared_celltype_order)
+    )
+    
+    all_gene_heatmap_dir <- file.path(dataset_out_dir, "all_gene_celltype_heatmaps")
+    fs::dir_create(all_gene_heatmap_dir)
+    
+    make_sig_stars <- function(p_adj) {
+      dplyr::case_when(
+        is.na(p_adj) ~ "",
+        p_adj < 0.001 ~ "***",
+        p_adj < 0.01 ~ "**",
+        p_adj < 0.05 ~ "*",
+        TRUE ~ ""
+      )
+    }
+    
+    make_beta_heatmap <- function(stats_df,
+                                  value_col,
+                                  p_adj_col,
+                                  title_text,
+                                  subtitle_text,
+                                  output_name) {
+      
+      heatmap_df <- stats_df %>%
+        dplyr::mutate(
+          value = .data[[value_col]],
+          p_adj = .data[[p_adj_col]],
+          significance = make_sig_stars(p_adj)
+        ) %>%
+        dplyr::filter(!is.na(value)) %>%
+        dplyr::mutate(
+          target_gene_symbol = factor(
+            target_gene_symbol,
+            levels = analysis_gene_symbols
+          ),
+          cell_type = factor(
+            cell_type,
+            levels = shared_celltype_order)
+        )
+      
+      p_heatmap <- ggplot(
+        heatmap_df,
+        aes(x = target_gene_symbol, y = cell_type, fill = value)
+      ) +
+        geom_tile(color = "white", linewidth = 0.4) +
+        geom_text(
+          aes(label = significance),
+          color = "black",
+          size = 4.5,
+          fontface = "bold"
+        ) +
+        scale_fill_gradient2(
+          low = "#2C7BB6",
+          mid = "white",
+          high = "#D7191C",
+          midpoint = 0,
+          name = "Age beta"
+        ) +
+        labs(
+          title = title_text,
+          subtitle = subtitle_text,
+          x = "Target gene",
+          y = "Cell type"
+        ) +
+        theme_pub(base_size = 12) +
+        theme(
+          plot.title = element_text(size = 8, face = "bold", hjust = 0.5),
+          plot.subtitle = element_text(size = 8, hjust = 0.5),
+          axis.text.x = element_text(angle = 45, hjust = 1),
+          panel.grid = element_blank()
+        )
+      
+      save_plot_pdf_png(
+        p_heatmap,
+        file.path(all_gene_heatmap_dir, output_name),
+        width = max(6, 0.9 * length(unique(heatmap_df$target_gene_symbol))),
+        height = max(5, 0.35 * length(unique(heatmap_df$cell_type)))
+      )
+    }
+    
+    make_r2_heatmap <- function(stats_df,
+                                value_col,
+                                p_adj_col,
+                                title_text,
+                                subtitle_text,
+                                output_name) {
+      
+      heatmap_df <- stats_df %>%
+        dplyr::mutate(
+          value = .data[[value_col]],
+          p_adj = .data[[p_adj_col]],
+          significance = make_sig_stars(p_adj)
+        ) %>%
+        dplyr::filter(!is.na(value)) %>%
+        dplyr::mutate(
+          target_gene_symbol = factor(
+            target_gene_symbol,
+            levels = analysis_gene_symbols
+          ),
+          cell_type = factor(
+            cell_type,
+            levels = shared_celltype_order)
+        )
+      
+      p_heatmap <- ggplot(
+        heatmap_df,
+        aes(x = target_gene_symbol, y = cell_type, fill = value)
+      ) +
+        geom_tile(color = "white", linewidth = 0.4) +
+        geom_text(
+          aes(label = significance),
+          color = "black",
+          size = 4.5,
+          fontface = "bold"
+        ) +
+        scale_fill_gradient(
+          low = "white",
+          high = "#54278F",
+          name = "R²"
+        ) +
+        labs(
+          title = title_text,
+          subtitle = subtitle_text,
+          x = "Target gene",
+          y = "Cell type"
+        ) +
+        theme_pub(base_size = 12) +
+        theme(
+          plot.title = element_text(size = 8, face = "bold", hjust = 0.5),
+          plot.subtitle = element_text(size = 8, hjust = 0.5),
+          axis.text.x = element_text(angle = 45, hjust = 1),
+          panel.grid = element_blank()
+        )
+      
+      save_plot_pdf_png(
+        p_heatmap,
+        file.path(all_gene_heatmap_dir, output_name),
+        width = max(6, 0.9 * length(unique(heatmap_df$target_gene_symbol))),
+        height = max(5, 0.35 * length(unique(heatmap_df$cell_type)))
+      )
+    }
+    
+    # Heatmap 1: beta for mean expression vs age.
+    make_beta_heatmap(
+      stats_df = all_celltype_stats_df,
+      value_col = "beta_age_mean",
+      p_adj_col = "p_adj_mean",
+      title_text = "Age association of mean gene expression by cell type",
+      subtitle_text = "Color shows age beta coefficient; stars indicate BH-adjusted P value",
+      output_name = "all_genes_celltypes_beta_age_mean_heatmap"
+    )
+    
+    # Heatmap 2: beta for percent-positive cells vs age.
+    make_beta_heatmap(
+      stats_df = all_celltype_stats_df,
+      value_col = "beta_age_pct",
+      p_adj_col = "p_adj_pct",
+      title_text = "Age association of gene-positive cell percentage by cell type",
+      subtitle_text = "Color shows age beta coefficient; stars indicate BH-adjusted P value",
+      output_name = "all_genes_celltypes_beta_age_percent_positive_heatmap"
+    )
+    
+    # Heatmap 3: R² for mean expression model.
+    make_r2_heatmap(
+      stats_df = all_celltype_stats_df,
+      value_col = "r2_mean",
+      p_adj_col = "p_adj_mean",
+      title_text = "Model R² for mean gene expression age association by cell type",
+      subtitle_text = "Color shows R²; stars indicate BH-adjusted P value for age",
+      output_name = "all_genes_celltypes_r2_mean_expression_heatmap"
+    )
+  
+    # Heatmap 4: R² for percent-positive cells model.
+    make_r2_heatmap(
+      stats_df = all_celltype_stats_df,
+      value_col = "r2_pct",
+      p_adj_col = "p_adj_pct",
+      title_text = "Model R² for gene-positive cell percentage age association by cell type",
+      subtitle_text = "Color shows R²; stars indicate BH-adjusted P value for age",
+      output_name = "all_genes_celltypes_r2_gene-positive cell percentage_heatmap"
+    )
+    
+    write.csv(
+      all_celltype_stats_df,
+      file.path(all_gene_heatmap_dir, "all_genes_celltype_age_correlation_stats.csv"),
+      row.names = FALSE
+    )
+  }
+  
   gc()
 }
 
