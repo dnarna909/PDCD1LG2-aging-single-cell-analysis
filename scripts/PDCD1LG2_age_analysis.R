@@ -92,14 +92,7 @@ file_list <- list(
     celltype_col = "cell_type",
     age_col = "development_stage",
     required_metadata = c("donor_id", "development_stage", "sex", "cell_type")
-  )
-  # Example for adding another dataset:
-  # list(
-  #   name = "sn RNA-seq of the Adult Human Kidney.h5ad",
-  #   celltype_col = "cell_type",
-  #   age_col = "development_stage",
-  #   required_metadata = c("donor_id", "development_stage", "sex", "cell_type")
-  # )
+  )  
 )
 
 # Genes to analyze.
