@@ -1,8 +1,7 @@
 #!/usr/bin/env Rscript
 
-# ============================================================
-# PDCD1LG2 aging single-cell analysis
-# ============================================================
+# PDCD1LG2 aging single-cell analysis ============================================================
+
 #
 # Goals:
 #  1. Evaluate whether PDCD1LG2, MMP2, MMP9, CDKN1A, CDKN2A, IFNG, and TNF
@@ -24,12 +23,12 @@
 #
 # Optional environment variables:
 #   DATA_DIR=/path/to/h5ad/files RESULTS_DIR=/path/to/results Rscript scripts/PDCD1LG2_age_analysis.R
-# ============================================================
 
 
-# -----------------------------
-# 1. Package setup
-# -----------------------------
+
+
+# 1. Package setup -----------------------------
+
 
 required_packages <- c(
   "anndataR",
@@ -72,9 +71,9 @@ suppressPackageStartupMessages({
 })
 
 
-# -----------------------------
-# 2. User configuration
-# -----------------------------
+
+# 2. User configuration -----------------------------
+
 
 data_dir <- Sys.getenv("DATA_DIR", unset = "data")
 results_dir <- Sys.getenv("RESULTS_DIR", unset = "results")
@@ -133,7 +132,83 @@ exclude_celltypes <- c(
 )
 
 min_cells_per_donor_celltype <- 20
-min_donors_per_celltype <- 4
+min_donors_per_celltype <- 6
+
+genes.label <- c(
+  "PDCD1LG2 (PD-L2)",
+  "CDKN2A (p16)",
+  "CDKN1A (p21)",
+  "MMP2",
+  "MMP9",
+  "TNF",
+  "IFNG"
+)
+
+genes.order <- c(
+  "PDCD1LG2",
+  "CDKN2A",
+  "CDKN1A",
+  "MMP2",
+  "MMP9",
+  "TNF",
+  "IFNG"
+)
+
+cell.order <- c(
+  "hematopoietic stem cell"  ,
+  "endothelial cell of hepatic sinusoid",
+  "hepatocyte"             ,
+  "macrophage"      ,
+  "Kupffer cell"      ,
+  "cholangiocyte"     ,
+  "natural killer cell"    ,
+  "T cell"         ,
+  "mononuclear phagocyte"     ,
+  "mature B cell"       ,
+  "plasma cell"       ,   
+  "gamma-delta T cell"   ,
+  "unknown",
+  "All cells",
+  "erythrocyte"                ,
+  "platelet"      ,
+  "neutrophil"       ,
+  "conventional dendritic cell"     ,
+  "cycling myeloid cell"        ,
+  "cycling plasma cell"       
+)
+
+cell.label <- c(
+  "Hematopoietic stem cell"  ,
+  "Endothelial cell of hepatic sinusoid",
+  "Hepatocyte"             ,
+  "Macrophage"      ,
+  "Kupffer cell"      ,
+  "Cholangiocyte"     ,
+  "Natural killer cell"    ,
+  "T cell"         ,
+  "Mononuclear phagocyte"     ,
+  "Mature B cell"       ,
+  "Plasma cell"       ,   
+  "Gamma-delta T cell"   ,
+  "Unknown",
+  "All cells",
+  
+  "erythrocyte"                ,
+  "platelet"      ,
+  "neutrophil"       ,
+  "conventional dendritic cell"     ,
+  "cycling myeloid cell"        ,
+  "cycling plasma cell"       
+)
+
+cell.label.map <- stats::setNames(cell.label, cell.order)
+gene.label.map <- stats::setNames(genes.label, genes.order)
+
+# Reverse row order for plotting
+cell.order.rev <- rev(cell.order)
+cell.label.rev <- rev(cell.label)
+cell.label.map.rev <- stats::setNames(cell.label.rev, cell.order.rev)
+
 
 # Two model sets will be generated throughout the analysis.
 model_configs <- list(
@@ -150,9 +225,8 @@ model_configs <- list(
 )
 
 
-# -----------------------------
-# 3. Helper functions
-# -----------------------------
+# 3. Helper functions -----------------------------
+
 
 safe_filename <- function(x) {
   x %>%
@@ -179,23 +253,23 @@ detect_gene_id_type <- function(feature_names) {
 
 get_gene_ids <- function(target_gene_symbol, analysis_gene_symbols, gene_map, id_type) {
   other_gene_symbols <- setdiff(analysis_gene_symbols, target_gene_symbol)
-
+  
   if (id_type == "ensembl") {
     target_gene <- gene_map$ensembl_gene_id[
       match(target_gene_symbol, gene_map$hgnc_symbol)
     ]
-
+    
     other_genes <- gene_map$ensembl_gene_id[
       match(other_gene_symbols, gene_map$hgnc_symbol)
     ]
-
+    
     gene_label_map <- setNames(other_gene_symbols, other_genes)
   } else {
     target_gene <- target_gene_symbol
     other_genes <- other_gene_symbols
     gene_label_map <- setNames(other_gene_symbols, other_genes)
   }
-
+  
   list(
     target_gene = target_gene,
     other_genes = other_genes,
@@ -208,13 +282,13 @@ get_gene_ids <- function(target_gene_symbol, analysis_gene_symbols, gene_map, id
 get_expression_matrix <- function(seurat_obj) {
   assay_name <- DefaultAssay(seurat_obj)
   available_layers <- Layers(seurat_obj[[assay_name]])
-
+  
   layer_use <- if ("X" %in% available_layers) {
     "X"
   } else {
     available_layers[1]
   }
-
+  
   message("Using RNA layer: ", layer_use)
   LayerData(seurat_obj, assay = assay_name, layer = layer_use)
 }
@@ -237,18 +311,20 @@ extract_age_model_stats <- function(model) {
   model_summary <- summary(model)
   age_row <- broom::tidy(model) %>%
     dplyr::filter(term == "age")
-
+  
   if (nrow(age_row) == 0) {
     return(list(
       beta_age = NA_real_,
       r2 = model_summary$r.squared,
+      adj_r2 = model_summary$adj.r.squared,
       p_age = NA_real_
     ))
   }
-
+  
   list(
     beta_age = age_row$estimate[1],
     r2 = model_summary$r.squared,
+    adj_r2 = model_summary$adj.r.squared,
     p_age = age_row$p.value[1]
   )
 }
@@ -256,9 +332,11 @@ extract_age_model_stats <- function(model) {
 get_model_label <- function(model, p_adj) {
   model_summary <- summary(model)
   r2 <- model_summary$r.squared
-
+  adj_r2 <- model_summary$adj.r.squared
+  
   paste0(
     "R² = ", round(r2, 3),
+    "\nAdjusted R² = ", round(adj_r2, 3),
     "\n", format_p(p_adj, prefix = "adj. P")
   )
 }
@@ -303,7 +381,7 @@ save_plot_pdf_png <- function(plot, filename_base, width, height, dpi = 600) {
     height = height,
     device = grDevices::cairo_pdf
   )
-
+  
   ggsave(
     filename = paste0(filename_base, ".png"),
     plot = plot,
@@ -321,21 +399,21 @@ extract_numeric_age <- function(metadata_df, age_col) {
 
 fit_donor_models <- function(data, model_config) {
   valid_covars <- get_valid_covars(data, model_config$covars)
-
+  
   formula_mean <- make_lm_formula("mean_target_gene", valid_covars)
   formula_pct <- make_lm_formula("pct_target_gene_pos", valid_covars)
-
+  
   model_mean <- lm(formula_mean, data = data)
   model_pct <- lm(formula_pct, data = data)
-
+  
   stats_mean <- extract_age_model_stats(model_mean)
   stats_pct <- extract_age_model_stats(model_pct)
-
+  
   p_adj <- p.adjust(
     c(mean_expression = stats_mean$p_age, percent_positive = stats_pct$p_age),
     method = "BH"
   )
-
+  
   list(
     model_mean = model_mean,
     model_pct = model_pct,
@@ -356,24 +434,24 @@ get_adjusted_prediction_df <- function(data, model, valid_covars, y_var, n_point
     max(data$age, na.rm = TRUE),
     length.out = n_points
   )
-
+  
   pred_df <- data.frame(age = age_seq)
-
+  
   for (covar in valid_covars) {
     covar_values <- data[[covar]]
-
+    
     if (is.numeric(covar_values)) {
       pred_df[[covar]] <- stats::median(covar_values, na.rm = TRUE)
     } else {
       ref_value <- names(sort(table(covar_values), decreasing = TRUE))[1]
       pred_df[[covar]] <- ref_value
-
+      
       if (is.factor(covar_values)) {
         pred_df[[covar]] <- factor(pred_df[[covar]], levels = levels(covar_values))
       }
     }
   }
-
+  
   pred_values <- predict(model, newdata = pred_df, interval = "confidence")
   pred_df$fit <- pred_values[, "fit"]
   pred_df$lwr <- pred_values[, "lwr"]
@@ -383,15 +461,17 @@ get_adjusted_prediction_df <- function(data, model, valid_covars, y_var, n_point
 
 make_all_cells_stats_row <- function(donor_expr, target_gene_symbol, file_name, model_name, model_config) {
   model_results <- fit_donor_models(donor_expr, model_config)
-
+  
   data.frame(
     cell_type = "All cells",
     n_donors = dplyr::n_distinct(donor_expr$donor_id),
     beta_age_mean = model_results$stats_mean$beta_age,
     r2_mean = model_results$stats_mean$r2,
+    adj_r2_mean = model_results$stats_mean$adj_r2,
     p_age_mean = model_results$stats_mean$p_age,
     beta_age_pct = model_results$stats_pct$beta_age,
     r2_pct = model_results$stats_pct$r2,
+    adj_r2_pct = model_results$stats_pct$adj_r2,
     p_age_pct = model_results$stats_pct$p_age,
     p_adj_mean = model_results$p_adj_mean,
     p_adj_pct = model_results$p_adj_pct,
@@ -421,19 +501,21 @@ calculate_celltype_stats <- function(celltype_expr, model_name, model_config, fi
     dplyr::ungroup() %>%
     dplyr::distinct(cell_type) %>%
     dplyr::pull(cell_type)
-
+  
   stats_list <- lapply(celltypes, function(ct) {
     dat <- celltype_expr %>% dplyr::filter(cell_type == ct)
     model_results <- fit_donor_models(dat, model_config)
-
+    
     data.frame(
       cell_type = ct,
       n_donors = dplyr::n_distinct(dat$donor_id),
       beta_age_mean = model_results$stats_mean$beta_age,
       r2_mean = model_results$stats_mean$r2,
+      adj_r2_mean = model_results$stats_mean$adj_r2,
       p_age_mean = model_results$stats_mean$p_age,
       beta_age_pct = model_results$stats_pct$beta_age,
       r2_pct = model_results$stats_pct$r2,
+      adj_r2_pct = model_results$stats_pct$adj_r2,
       p_age_pct = model_results$stats_pct$p_age,
       covariates_used = paste(model_results$valid_covars, collapse = ";"),
       file_name = file_name,
@@ -442,13 +524,13 @@ calculate_celltype_stats <- function(celltype_expr, model_name, model_config, fi
       stringsAsFactors = FALSE
     )
   })
-
+  
   stats_df <- dplyr::bind_rows(stats_list)
-
+  
   if (nrow(stats_df) == 0) {
     return(stats_df)
   }
-
+  
   stats_df %>%
     dplyr::mutate(
       p_adj_mean = p.adjust(p_age_mean, method = "BH"),
@@ -475,16 +557,16 @@ make_celltype_plot <- function(data, y_var, y_label, title_text, subtitle_text,
   } else {
     model_results$model_pct
   }
-
+  
   label_text <- get_model_label(model_to_label, p_adj)
-
+  
   pred_df <- get_adjusted_prediction_df(
     data = data,
     model = model_to_label,
     valid_covars = model_results$valid_covars,
     y_var = y_var
   )
-
+  
   ggplot(data, aes(x = age, y = .data[[y_var]])) +
     geom_point(aes(size = n_cells), alpha = 0.75, color = "black") +
     geom_ribbon(
@@ -518,36 +600,81 @@ make_sig_stars <- function(p_adj) {
 }
 
 make_heatmap <- function(stats_df, value_col, p_adj_col, title_text, subtitle_text,
-                         output_name, heatmap_dir, shared_celltype_order,
-                         fill_type = c("beta", "r2")) {
+                         output_name, heatmap_dir, shared_celltype_order, analysis_gene_symbols_order,
+                         fill_type = c("signed_adjusted_r2", "signed_r2", "beta", "r2") ) {
   fill_type <- match.arg(fill_type)
-
+  
   heatmap_df <- stats_df %>%
     dplyr::mutate(
       value = .data[[value_col]],
       p_adj = .data[[p_adj_col]],
       significance = make_sig_stars(p_adj),
-      target_gene_symbol = factor(target_gene_symbol, levels = analysis_gene_symbols),
+      target_gene_symbol = factor(target_gene_symbol, levels = analysis_gene_symbols_order),
       cell_type = factor(cell_type, levels = shared_celltype_order)
     ) %>%
-    dplyr::filter(!is.na(value))
-
+    # dplyr::filter(!is.na(value)) %>%
+    mutate(
+      missing_label = dplyr::if_else(
+        is.na(.data[[value_col]]) | .data[[value_col]] == 0,
+        "X",
+        ""
+      )
+    )
+  
+  max_abs_value <- max(abs(heatmap_df[[value_col]]), na.rm = TRUE)
+  
+  if (!is.finite(max_abs_value) || max_abs_value == 0) {
+    max_abs_value <- 1
+  }
+  
+  n_rows <- length(unique(heatmap_df$cell_type))
+  
+  legend_barheight <- grid::unit(
+    max(3, 0.35 * n_rows),
+    "cm"
+  )
+  
   fill_scale <- if (fill_type == "beta") {
     scale_fill_gradient2(
       low = "#2C7BB6",
       mid = "white",
       high = "#D7191C",
       midpoint = 0,
-      name = "Age beta"
+      limits = c(-max_abs_value*0.25, max_abs_value*0.25),
+      breaks = c(-max_abs_value*0.25, 0, max_abs_value*0.25),
+      labels = scales::number_format(accuracy = 0.001),
+      na.value = "grey90",
+      # name = "Age beta"
+      name = NULL
     )
-  } else {
+  } else if (fill_type == "r2") {
     scale_fill_gradient(
       low = "white",
       high = "#54278F",
-      name = "R²"
+      limits = c(0, 1),
+      breaks = c(0, 0.5, 1),
+      labels = scales::number_format(accuracy = 0.01),
+      na.value = "grey90",
+      # name = "R²",
+      name = NULL
+    )
+  } else if (fill_type %in% c("signed_r2", "signed_adjusted_r2")) {
+    scale_fill_gradient2(
+      low = "blue",
+      mid = "white",
+      high = "red",
+      midpoint = 0,
+      # limits = c(-max_abs_value, max_abs_value),
+      # breaks = c(-max_abs_value, 0, max_abs_value),
+      # labels = scales::number_format(accuracy = 0.01),
+      limits = c(-1, 1),
+      breaks = c(-1, -0.5, 0, 0.5, 1),
+      na.value = "grey90",
+      # name = dplyr::if_else(fill_type == "signed_adjusted_r2", "Signed adjusted R²", "Signed R²")
+      name = NULL
     )
   }
-
+  
   p_heatmap <- ggplot(
     heatmap_df,
     aes(x = target_gene_symbol, y = cell_type, fill = value)
@@ -559,6 +686,13 @@ make_heatmap <- function(stats_df, value_col, p_adj_col, title_text, subtitle_te
       size = 4.5,
       fontface = "bold"
     ) +
+    geom_text(
+      ggplot2::aes(label = missing_label),
+      size = 5,
+      fontface = "bold",
+      color = "black",
+      na.rm = TRUE
+    ) +
     fill_scale +
     labs(
       title = title_text,
@@ -568,12 +702,34 @@ make_heatmap <- function(stats_df, value_col, p_adj_col, title_text, subtitle_te
     ) +
     theme_pub(base_size = 12) +
     theme(
+      legend.title = ggplot2::element_blank(),
+      legend.key.height = legend_barheight,
+      legend.key.width = grid::unit(0.35, "cm"),
+      axis.title = ggplot2::element_text(face = "bold"),
       plot.title = element_text(size = 8, face = "bold", hjust = 0.5),
       plot.subtitle = element_text(size = 8, hjust = 0.5),
       axis.text.x = element_text(angle = 45, hjust = 1),
-      panel.grid = element_blank()
-    )
-
+      axis.text.y = ggplot2::element_text(size = 12),
+      panel.grid = element_blank(),
+      axis.line = ggplot2::element_blank(),
+      panel.border = ggplot2::element_rect(
+        color = "black",
+        fill = NA,
+        linewidth = 1
+      )
+    ) +
+    guides(
+      fill = ggplot2::guide_colorbar(
+        title = NULL,
+        # barheight = grid::unit(1, "npc"), # too tall
+        barheight = legend_barheight,
+        barwidth = grid::unit(0.35, "cm"),
+        frame.colour = "black",
+        frame.linewidth = 0.5,
+        ticks.colour = "black"
+      )
+    ) 
+  
   save_plot_pdf_png(
     p_heatmap,
     file.path(heatmap_dir, output_name),
@@ -583,23 +739,25 @@ make_heatmap <- function(stats_df, value_col, p_adj_col, title_text, subtitle_te
 }
 
 
-# -----------------------------
-# 4. Main analysis
-# -----------------------------
+
+# 4. Main analysis-----------------------------
+
 
 for (ff in seq_along(file_list)) {
-
+  
   file_name <- file_list[[ff]]$name
   celltype_col <- file_list[[ff]]$celltype_col
   age_col <- file_list[[ff]]$age_col
   required_metadata <- file_list[[ff]]$required_metadata
-
+  
+  # 1) Processing dataset-----------------------------
+  
   message("===================================================")
   message("Processing dataset: ", file_name)
   message("===================================================")
-
+  
   input_file <- file.path(data_dir, file_name)
-
+  
   if (!file.exists(input_file)) {
     warning(
       "Input file not found: ", input_file,
@@ -607,10 +765,10 @@ for (ff in seq_along(file_list)) {
     )
     next
   }
-
+  
   dataset_out_dir <- file.path(results_dir, tools::file_path_sans_ext(file_name))
   fs::dir_create(dataset_out_dir)
-
+  
   seurat_obj <- tryCatch(
     {
       anndataR::read_h5ad(input_file, as = "Seurat")
@@ -620,39 +778,41 @@ for (ff in seq_along(file_list)) {
       return(NULL)
     }
   )
-
+  
   if (is.null(seurat_obj)) {
     next
   }
-
+  
   DefaultAssay(seurat_obj) <- "RNA"
-
+  
   if (!celltype_col %in% colnames(seurat_obj@meta.data)) {
     stop(
       "Cell type column '", celltype_col, "' not found. Available metadata columns are: ",
       paste(colnames(seurat_obj@meta.data), collapse = ", ")
     )
   }
-
+  
   celltype_values <- seurat_obj@meta.data[[celltype_col]]
   keep_cells <- !tolower(celltype_values) %in% tolower(exclude_celltypes)
-
+  
   seurat_obj <- subset(
     seurat_obj,
     cells = colnames(seurat_obj)[keep_cells]
   )
-
+  
   message("Remaining cells after cell type filtering: ", ncol(seurat_obj))
-
+  
+  
   if ("X_umap" %in% Reductions(seurat_obj)) {
     p_umap <- DimPlot(
       seurat_obj,
       reduction = "X_umap",
       group.by = celltype_col,
-      label = TRUE
+      label = TRUE,
+      repel = TRUE
     ) +
       ggtitle(paste0("Cell type overview: ", tools::file_path_sans_ext(file_name)))
-
+    
     save_plot_pdf_png(
       plot = p_umap,
       filename_base = file.path(dataset_out_dir, "celltype_umap_overview"),
@@ -660,32 +820,33 @@ for (ff in seq_along(file_list)) {
       height = 6
     )
   }
-
+  
   openxlsx::write.xlsx(
     list(
       subjects = as.data.frame.matrix(table(seurat_obj$development_stage, seurat_obj$donor_id)),
       cell_type = as.data.frame.matrix(table(seurat_obj$cell_type, seurat_obj$donor_id))
     ),
     file = file.path(dataset_out_dir, "celltype_summary_results.xlsx"),
-    overwrite = TRUE
+    overwrite = TRUE,
+    rowNames = TRUE
   )
-
+  
   expr_mat <- get_expression_matrix(seurat_obj)
   feature_names <- rownames(expr_mat)
   gene_id_type <- detect_gene_id_type(feature_names)
-
+  
   message("Detected gene identifier type: ", gene_id_type)
-
+  
   meta_df <- seurat_obj@meta.data
   meta_df$cell_barcode <- rownames(meta_df)
-
+  
   if (!"tissue" %in% colnames(meta_df) && "tissue_type" %in% colnames(meta_df)) {
     meta_df$tissue <- meta_df$tissue_type
   }
-
+  
   required_cols <- unique(c(required_metadata, "donor_id", age_col, "sex", "tissue", celltype_col))
   missing_cols <- setdiff(required_cols, colnames(meta_df))
-
+  
   if (length(missing_cols) > 0) {
     warning(
       "Skipping ", file_name,
@@ -694,16 +855,16 @@ for (ff in seq_along(file_list)) {
     )
     next
   }
-
+  
   if (celltype_col != "cell_type") {
     meta_df$cell_type <- meta_df[[celltype_col]]
   }
-
+  
   if (age_col != "development_stage") {
     meta_df$development_stage <- meta_df[[age_col]]
     age_col <- "development_stage"
   }
-
+  
   all_gene_celltype_stats <- list(
     age_only = list(),
     age_sex = list()
@@ -712,25 +873,26 @@ for (ff in seq_along(file_list)) {
     age_only = list(),
     age_sex = list()
   )
-
+  
+  # 2) Processing dataset-----------------------------
   for (target_gene_symbol in analysis_gene_symbols) {
-
+    
     message("---------------------------------------------------")
     message("Running target gene: ", target_gene_symbol)
     message("---------------------------------------------------")
-
+    
     gene_info <- get_gene_ids(
       target_gene_symbol = target_gene_symbol,
       analysis_gene_symbols = analysis_gene_symbols,
       gene_map = gene_map,
       id_type = gene_id_type
     )
-
+    
     target_gene <- gene_info$target_gene
     other_genes <- gene_info$other_genes
     all_genes <- gene_info$all_genes
     other_gene_symbols <- gene_info$other_gene_symbols
-
+    
     gene_check <- data.frame(
       target_gene_symbol = target_gene_symbol,
       gene_symbol = c(target_gene_symbol, other_gene_symbols),
@@ -738,11 +900,11 @@ for (ff in seq_along(file_list)) {
       present = all_genes %in% rownames(expr_mat),
       stringsAsFactors = FALSE
     )
-
+    
     print(gene_check)
-
+    
     genes_found <- all_genes[all_genes %in% rownames(expr_mat)]
-
+    
     if (!target_gene %in% genes_found) {
       warning(
         "Skipping target gene ", target_gene_symbol,
@@ -750,25 +912,27 @@ for (ff in seq_along(file_list)) {
       )
       next
     }
-
+    
     other_genes_found <- other_genes[other_genes %in% rownames(expr_mat)]
-
+    
     gene_out_dir <- file.path(dataset_out_dir, target_gene_symbol)
     fs::dir_create(gene_out_dir)
-
+    
     genes_for_this_analysis <- c(target_gene, other_genes_found)
-
+    
     expr_df <- as.data.frame(
       t(as.matrix(expr_mat[genes_for_this_analysis, colnames(seurat_obj), drop = FALSE]))
     )
-
+    
     colnames(expr_df)[colnames(expr_df) == target_gene] <- "target_gene"
     expr_df$cell_barcode <- rownames(expr_df)
-
+    
     df <- meta_df %>%
       left_join(expr_df, by = "cell_barcode") %>%
       extract_numeric_age(age_col = age_col)
-
+    
+    # Goal 1: Donor-level association with age across all cells============================================================
+    
     donor_expr <- df %>%
       group_by(donor_id, age, sex, tissue) %>%
       summarise(
@@ -777,13 +941,14 @@ for (ff in seq_along(file_list)) {
         n_cells = n(),
         .groups = "drop"
       )
-
+    
     write.csv(
       donor_expr,
       file.path(gene_out_dir, paste0(target_gene_symbol, "_donor_level_expression.csv")),
       row.names = FALSE
     )
-
+    
+    # Goal 2: Donor-level association with age by cell type ============================================================
     celltype_expr <- df %>%
       group_by(donor_id, age, sex, tissue, cell_type) %>%
       summarise(
@@ -793,41 +958,41 @@ for (ff in seq_along(file_list)) {
         .groups = "drop"
       ) %>%
       filter(n_cells >= min_cells_per_donor_celltype)
-
+    
     write.csv(
       celltype_expr,
       file.path(gene_out_dir, paste0(target_gene_symbol, "_donor_level_expression_by_celltype.csv")),
       row.names = FALSE
     )
-
+    
     for (model_name in names(model_configs)) {
       model_config <- model_configs[[model_name]]
       model_suffix <- model_config$suffix
-
+      
       message("Running ", model_config$label, " for ", target_gene_symbol)
-
+      
       model_out_dir <- file.path(gene_out_dir, model_suffix)
       all_cell_plot_dir <- file.path(model_out_dir, "all_cells")
       celltype_plot_dir <- file.path(model_out_dir, paste0(target_gene_symbol, "_celltype_plots"))
       mean_plot_dir <- file.path(celltype_plot_dir, "mean_expression")
       pct_plot_dir <- file.path(celltype_plot_dir, "percent_positive")
-
+      
       fs::dir_create(all_cell_plot_dir)
       fs::dir_create(mean_plot_dir)
       fs::dir_create(pct_plot_dir)
-
+      
       all_model_results <- fit_donor_models(donor_expr, model_config)
-
+      
       label_mean <- get_model_label(all_model_results$model_mean, all_model_results$p_adj_mean)
       label_pct <- get_model_label(all_model_results$model_pct, all_model_results$p_adj_pct)
-
+      
       pred_all_mean <- get_adjusted_prediction_df(
         data = donor_expr,
         model = all_model_results$model_mean,
         valid_covars = all_model_results$valid_covars,
         y_var = "mean_target_gene"
       )
-
+      
       p_all_mean <- ggplot(donor_expr, aes(x = age, y = mean_target_gene)) +
         geom_point(aes(size = n_cells), alpha = 0.75, color = "black") +
         geom_ribbon(
@@ -853,14 +1018,14 @@ for (ff in seq_along(file_list)) {
           y = paste0("Mean ", target_gene_symbol, " expression per donor")
         ) +
         theme_pub()
-
+      
       pred_all_pct <- get_adjusted_prediction_df(
         data = donor_expr,
         model = all_model_results$model_pct,
         valid_covars = all_model_results$valid_covars,
         y_var = "pct_target_gene_pos"
       )
-
+      
       p_all_pct <- ggplot(donor_expr, aes(x = age, y = pct_target_gene_pos)) +
         geom_point(aes(size = n_cells), alpha = 0.75, color = "black") +
         geom_ribbon(
@@ -886,21 +1051,21 @@ for (ff in seq_along(file_list)) {
           y = paste0("% ", target_gene_symbol, "+ cells per donor")
         ) +
         theme_pub()
-
+      
       save_plot_pdf_png(
         p_all_mean,
         file.path(all_cell_plot_dir, paste0(target_gene_symbol, "_", model_suffix, "_vs_age_all_donors_mean")),
         width = 6,
         height = 5
       )
-
+      
       save_plot_pdf_png(
         p_all_pct,
         file.path(all_cell_plot_dir, paste0(target_gene_symbol, "_", model_suffix, "_vs_age_all_donors_percent_positive")),
         width = 6,
         height = 5
       )
-
+      
       all_cells_stats_row <- make_all_cells_stats_row(
         donor_expr = donor_expr,
         target_gene_symbol = target_gene_symbol,
@@ -908,45 +1073,45 @@ for (ff in seq_along(file_list)) {
         model_name = model_name,
         model_config = model_config
       )
-
+      
       all_gene_all_cells_stats[[model_name]][[target_gene_symbol]] <- all_cells_stats_row
-
+      
       celltype_stats <- calculate_celltype_stats(
         celltype_expr = celltype_expr,
         model_name = model_name,
         model_config = model_config,
         file_name = file_name
       )
-
+      
       if (nrow(celltype_stats) == 0) {
         warning("No eligible cell types for ", target_gene_symbol, " in ", model_config$label)
         next
       }
-
+      
       celltype_stats <- celltype_stats %>%
         mutate(target_gene_symbol = target_gene_symbol)
-
+      
       all_gene_celltype_stats[[model_name]][[target_gene_symbol]] <- celltype_stats
-
+      
       write.csv(
         celltype_stats,
         file.path(gene_out_dir, paste0(target_gene_symbol, "_", model_suffix, "_age_correlation_by_celltype.csv")),
         row.names = FALSE
       )
-
+      
       celltypes_to_plot <- celltype_stats %>%
         filter(n_donors >= min_donors_per_celltype) %>%
         pull(cell_type)
-
+      
       for (ct in celltypes_to_plot) {
         plot_data <- celltype_expr %>%
           filter(cell_type == ct)
-
+        
         ct_safe <- safe_filename(ct)
-
+        
         ct_stats <- celltype_stats %>%
           filter(cell_type == ct)
-
+        
         p_mean <- make_celltype_plot(
           data = plot_data,
           y_var = "mean_target_gene",
@@ -958,7 +1123,7 @@ for (ff in seq_along(file_list)) {
           model_config = model_config,
           p_adj = ct_stats$p_adj_mean[1]
         )
-
+        
         p_pct <- make_celltype_plot(
           data = plot_data,
           y_var = "pct_target_gene_pos",
@@ -970,14 +1135,14 @@ for (ff in seq_along(file_list)) {
           model_config = model_config,
           p_adj = ct_stats$p_adj_pct[1]
         )
-
+        
         save_plot_pdf_png(
           p_mean,
           file.path(mean_plot_dir, paste0(target_gene_symbol, "_", model_suffix, "_", ct_safe, "_mean_expression_vs_age")),
           width = 6.5,
           height = 5
         )
-
+        
         save_plot_pdf_png(
           p_pct,
           file.path(pct_plot_dir, paste0(target_gene_symbol, "_", model_suffix, "_", ct_safe, "_percent_positive_vs_age")),
@@ -987,101 +1152,160 @@ for (ff in seq_along(file_list)) {
       }
     }
   }
-
-  # ============================================================
-  # All-gene heatmaps for each model set
+  
+  
+  # 3) All-gene heatmaps for each model set ============================================================
   # Rows = cell types plus "All cells" row
   # Columns = target genes
-  # ============================================================
-
+  
   for (model_name in names(model_configs)) {
     model_config <- model_configs[[model_name]]
     model_suffix <- model_config$suffix
-
+    
     if (length(all_gene_celltype_stats[[model_name]]) == 0) {
       next
     }
-
+    
     celltype_stats_df <- dplyr::bind_rows(all_gene_celltype_stats[[model_name]])
     all_cells_stats_df <- dplyr::bind_rows(all_gene_all_cells_stats[[model_name]])
-
+    
     all_heatmap_stats_df <- dplyr::bind_rows(
       celltype_stats_df,
       all_cells_stats_df
-    )
-
-    shared_celltype_order <- all_heatmap_stats_df %>%
-      filter(target_gene_symbol == "PDCD1LG2", cell_type != "All cells") %>%
-      arrange(beta_age_mean) %>%
-      pull(cell_type)
-
-    shared_celltype_order <- c(
-      shared_celltype_order,
-      setdiff(
-        unique(all_heatmap_stats_df$cell_type),
-        c(shared_celltype_order, "All cells")
-      ),
-      "All cells"
-    )
-
+    )%>%
+      dplyr::mutate(
+        signed_r2_mean = dplyr::case_when(
+          is.na(r2_mean) | is.na(beta_age_mean) ~ NA_real_,
+          beta_age_mean < 0 ~ -abs(r2_mean),
+          beta_age_mean > 0 ~  abs(r2_mean),
+          TRUE ~ 0
+        ),
+        signed_r2_pct = dplyr::case_when(
+          is.na(r2_pct) | is.na(beta_age_pct) ~ NA_real_,
+          beta_age_pct < 0 ~ -abs(r2_pct),
+          beta_age_pct > 0 ~  abs(r2_pct),
+          TRUE ~ 0
+        ),
+        signed_adj_r2_mean = dplyr::case_when(
+          is.na(adj_r2_mean) | is.na(beta_age_mean) ~ NA_real_,
+          beta_age_mean < 0 ~ -abs(adj_r2_mean),
+          beta_age_mean > 0 ~  abs(adj_r2_mean),
+          TRUE ~ 0
+        ),
+        signed_adj_r2_pct = dplyr::case_when(
+          is.na(adj_r2_pct) | is.na(beta_age_pct) ~ NA_real_,
+          beta_age_pct < 0 ~ -abs(adj_r2_pct),
+          beta_age_pct > 0 ~  abs(adj_r2_pct),
+          TRUE ~ 0
+        ),
+        target_gene_symbol = factor(
+          target_gene_symbol,
+          levels = genes.order,
+          labels = genes.label
+        ),
+        cell_type = factor(
+          cell_type,
+          levels = cell.order.rev,
+          labels = cell.label.rev
+        )
+      ) %>%
+      dplyr::filter(
+        !is.na(target_gene_symbol),
+        !is.na(cell_type)
+      )
+    
+    shared_celltype_order <- cell.label.rev
+    
+    # shared_celltype_order <- all_heatmap_stats_df %>%
+    #   filter(target_gene_symbol == "PDCD1LG2", cell_type != "All cells") %>%
+    #   arrange(beta_age_mean) %>%
+    #   pull(cell_type)
+    
+    # shared_celltype_order <- c(
+    #   shared_celltype_order,
+    #   setdiff(
+    #     unique(all_heatmap_stats_df$cell_type),
+    #     c(shared_celltype_order, "All cells")
+    #   ),
+    #   "All cells"
+    # )
+    
     all_gene_heatmap_dir <- file.path(dataset_out_dir, "all_gene_celltype_heatmaps", model_suffix)
     fs::dir_create(all_gene_heatmap_dir)
-
+    
     make_heatmap(
       stats_df = all_heatmap_stats_df,
       value_col = "beta_age_mean",
       p_adj_col = "p_adj_mean",
       title_text = "Age association of mean gene expression by cell type",
-      subtitle_text = paste0(model_config$label, "; color shows age beta coefficient; stars indicate BH-adjusted P value"),
+      subtitle_text = paste0(model_config$label, "; color shows age beta coefficient; \nstars indicate BH-adjusted P value"),
       output_name = paste0("all_genes_celltypes_", model_suffix, "_beta_age_mean_heatmap"),
       heatmap_dir = all_gene_heatmap_dir,
       shared_celltype_order = shared_celltype_order,
+      analysis_gene_symbols_order = genes.label,
       fill_type = "beta"
     )
-
+    
     make_heatmap(
       stats_df = all_heatmap_stats_df,
       value_col = "beta_age_pct",
       p_adj_col = "p_adj_pct",
       title_text = "Age association of gene-positive cell percentage by cell type",
-      subtitle_text = paste0(model_config$label, "; color shows age beta coefficient; stars indicate BH-adjusted P value"),
+      subtitle_text = paste0(model_config$label, "; color shows age beta coefficient; \nstars indicate BH-adjusted P value"),
       output_name = paste0("all_genes_celltypes_", model_suffix, "_beta_age_percent_positive_heatmap"),
       heatmap_dir = all_gene_heatmap_dir,
       shared_celltype_order = shared_celltype_order,
+      analysis_gene_symbols_order = genes.label,
       fill_type = "beta"
     )
-
+    
     make_heatmap(
       stats_df = all_heatmap_stats_df,
-      value_col = "r2_mean",
+      value_col = "signed_adj_r2_mean",
       p_adj_col = "p_adj_mean",
-      title_text = "Model R² for mean gene expression age association by cell type",
-      subtitle_text = paste0(model_config$label, "; color shows R²; stars indicate BH-adjusted P value for age"),
-      output_name = paste0("all_genes_celltypes_", model_suffix, "_r2_mean_expression_heatmap"),
+      title_text = "Signed adjusted model R² for mean gene expression age \nassociation by cell type",
+      subtitle_text = paste0(
+        model_config$label,
+        "; color shows signed adjusted R² based on beta direction; \nstars indicate BH-adjusted P value for age"
+      ),
+      output_name = paste0(
+        "all_genes_celltypes_",
+        model_suffix,
+        "_signed_adjusted_r2_mean_expression_heatmap"
+      ),
       heatmap_dir = all_gene_heatmap_dir,
       shared_celltype_order = shared_celltype_order,
-      fill_type = "r2"
+      analysis_gene_symbols_order = genes.label,
+      fill_type = "signed_adjusted_r2"
     )
-
+    
     make_heatmap(
       stats_df = all_heatmap_stats_df,
-      value_col = "r2_pct",
+      value_col = "signed_adj_r2_pct",
       p_adj_col = "p_adj_pct",
-      title_text = "Model R² for gene-positive cell percentage age association by cell type",
-      subtitle_text = paste0(model_config$label, "; color shows R²; stars indicate BH-adjusted P value for age"),
-      output_name = paste0("all_genes_celltypes_", model_suffix, "_r2_percent_positive_heatmap"),
+      title_text = "Signed adjusted model R² for gene-positive cell percentage age \nassociation by cell type",
+      subtitle_text = paste0(
+        model_config$label,
+        "; color shows signed adjusted R² based on beta direction; \nstars indicate BH-adjusted P value for age"
+      ),
+      output_name = paste0(
+        "all_genes_celltypes_",
+        model_suffix,
+        "_signed_adjusted_r2_percent_positive_heatmap"
+      ),
       heatmap_dir = all_gene_heatmap_dir,
       shared_celltype_order = shared_celltype_order,
-      fill_type = "r2"
+      analysis_gene_symbols_order = genes.label,
+      fill_type = "signed_adjusted_r2"
     )
-
+    
     write.csv(
       all_heatmap_stats_df,
       file.path(all_gene_heatmap_dir, paste0("all_genes_celltype_age_correlation_stats_", model_suffix, ".csv")),
       row.names = FALSE
     )
   }
-
+  
   gc()
 }
 
@@ -1092,3 +1316,4 @@ capture.output(sessionInfo(), file = session_info_file)
 message("Analysis complete.")
 message("Results written to: ", normalizePath(results_dir, mustWork = FALSE))
 message("Session information written to: ", normalizePath(session_info_file, mustWork = FALSE))
+
