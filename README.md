@@ -1,7 +1,7 @@
 
 # PDCD1LG2 Aging Single-Cell Analysis
 
-This repository contains R scripts used to analyze age-associated expression of PDCD1LG2 and related genes in human single-cell or single-nucleus RNA-seq datasets.
+This repository contains R scripts used to analyze age-associated expression of PDCD1LG2 gene in human single-cell or single-nucleus RNA-seq datasets.
 
 ## Project goals
 
