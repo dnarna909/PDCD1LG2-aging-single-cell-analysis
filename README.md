@@ -5,7 +5,7 @@ This repository contains R scripts used to analyze age-associated expression of 
 
 ## Project goals
 
-1. Evaluate whether PDCD1LG2, MMP2, MMP9, CDKN1A, CDKN2A, IFNG, and TNF expression changes across all cells.  
+1. Evaluate whether PDCD1LG2 expression changes across all cells.  
 
 
 ## Input data
