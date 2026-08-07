@@ -85,25 +85,14 @@ file_list <- list(
 )
 
 analysis_gene_symbols <- c(
-  "PDCD1LG2",
-  "MMP2",
-  "MMP9",
-  "CDKN1A",
-  "CDKN2A",
-  "IFNG",
-  "TNF"
+  "PDCD1LG2"
 )
 
 gene_map <- data.frame(
-  hgnc_symbol = c("PDCD1LG2", "MMP2", "MMP9", "CDKN1A", "CDKN2A", "IFNG", "TNF"),
+  hgnc_symbol = c("PDCD1LG2"),
   ensembl_gene_id = c(
-    "ENSG00000197646", # PDCD1LG2
-    "ENSG00000087245", # MMP2
-    "ENSG00000100985", # MMP9
-    "ENSG00000124762", # CDKN1A
-    "ENSG00000147889", # CDKN2A
-    "ENSG00000111537", # IFNG
-    "ENSG00000232810"  # TNF
+    "ENSG00000197646" # PDCD1LG2
+   
   ),
   stringsAsFactors = FALSE
 )
