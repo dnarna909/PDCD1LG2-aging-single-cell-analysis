@@ -115,12 +115,7 @@ Example output structure:
 results/
 └── Healthy pediatric and adult human liver tissue/
     ├── PDCD1LG2/
-    ├── MMP2/
-    ├── MMP9/
-    ├── CDKN1A/
-    ├── CDKN2A/
-    ├── IFNG/
-    └── TNF/
+    
 ```
 
 ## Notes
